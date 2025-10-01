@@ -1,71 +1,84 @@
 package io;
 
+import model.*;
+import util.DateFormats;
+import exceptions.InvalidDataException;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import model.Bank;
-import model.ExchangeQuote;
-import model.ExchangeRate;
+import java.text.ParseException;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class ExchangeParser {
-  private static final SimpleDateFormat DF = new SimpleDateFormat("yyyy.MM.dd", Locale.US);
 
   public List<ExchangeRate> parseExchangeRatesFromFile(String file) throws IOException {
+    List<String> lines = Files.readAllLines(Path.of(file));
     List<ExchangeRate> out = new ArrayList<>();
-    for (String line : Files.readAllLines(Path.of(file))) addRate(out, line);
+    List<String> bad = new ArrayList<>();
+
+    for (String line : lines) {
+      try {
+        String[] p = line.trim().split("\\s+");
+        LineValidator.requireParts(p, 4, line);
+        out.add(new ExchangeRate(p[0], p[1], Double.parseDouble(p[2]), DateFormats.DF.parse(p[3])));
+      } catch (IllegalArgumentException | ParseException e) {
+        bad.add(line + " -> " + e.getMessage());
+      }
+    }
+    if (!bad.isEmpty()) {
+      throw new InvalidDataException("Ошибки в файле курсов:\n" + String.join("\n", bad));
+    }
     return out;
   }
 
   public List<Bank> parseBanksFromFile(String file) throws IOException {
+    List<String> lines = Files.readAllLines(Path.of(file));
     List<Bank> out = new ArrayList<>();
-    for (String line : Files.readAllLines(Path.of(file))) addBank(out, line);
+    List<String> bad = new ArrayList<>();
+    for (String line : lines) {
+      try {
+        String[] p = line.trim().split("\\s+");
+        LineValidator.requireParts(p, 2, line);
+        out.add(new Bank(p[0], Long.parseLong(p[1])));
+      } catch (Exception e) {
+        bad.add(line + " -> " + e.getMessage());
+      }
+    }
+    if (!bad.isEmpty()) {
+      throw new InvalidDataException("Ошибки в файле банков:\n" + String.join("\n", bad));
+    }
     return out;
   }
 
   public List<ExchangeQuote> parseQuotesFromFile(String file, List<Bank> banks) throws IOException {
+    Map<String, Bank> byName =
+        banks.stream().collect(Collectors.toMap(b -> b.getName().toLowerCase(Locale.ROOT), b -> b));
+
+    List<String> lines = Files.readAllLines(Path.of(file));
     List<ExchangeQuote> out = new ArrayList<>();
-    for (String line : Files.readAllLines(Path.of(file))) addQuote(out, line, banks);
+    List<String> bad = new ArrayList<>();
+    for (String line : lines) {
+      try {
+        String[] p = line.trim().split("\\s+");
+        LineValidator.requireParts(p, 6, line);
+        Bank bank = byName.getOrDefault(p[4].toLowerCase(Locale.ROOT), new Bank(p[4], 0));
+        out.add(
+            new ExchangeQuote(
+                p[0],
+                p[1],
+                Double.parseDouble(p[2]),
+                DateFormats.DF.parse(p[3]),
+                bank,
+                Double.parseDouble(p[5])));
+      } catch (Exception e) {
+        bad.add(line + " -> " + e.getMessage());
+      }
+    }
+    if (!bad.isEmpty()) {
+      throw new InvalidDataException("Ошибки в файле котировок:\n" + String.join("\n", bad));
+    }
     return out;
-  }
-
-  private void addRate(List<ExchangeRate> out, String line) {
-    try {
-      String[] parts = line.split(" ");
-      out.add(
-          new ExchangeRate(parts[0], parts[1], Double.parseDouble(parts[2]), DF.parse(parts[3])));
-    } catch (Exception ignored) {
-    }
-  }
-
-  private void addBank(List<Bank> out, String line) {
-    try {
-      String[] parts = line.split(" ");
-      out.add(new Bank(parts[0], Long.parseLong(parts[1])));
-    } catch (Exception ignored) {
-    }
-  }
-
-  private void addQuote(List<ExchangeQuote> out, String line, List<Bank> banks) {
-    try {
-      String[] parts = line.split(" ");
-      Bank bank =
-          banks.stream()
-              .filter(x -> x.getName().equalsIgnoreCase(parts[4]))
-              .findFirst()
-              .orElse(new Bank(parts[4], 0));
-      out.add(
-          new ExchangeQuote(
-              parts[0],
-              parts[1],
-              Double.parseDouble(parts[2]),
-              DF.parse(parts[3]),
-              bank,
-              Double.parseDouble(parts[5])));
-    } catch (Exception ignored) {
-    }
   }
 }
